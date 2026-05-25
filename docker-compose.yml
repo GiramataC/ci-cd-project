@@ -1,6 +1,14 @@
 
+# x-airflow-common: &airflow-common
+#   image: apache/airflow:2.8.1
+
+
 x-airflow-common: &airflow-common
-  image: apache/airflow:2.8.1
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: airflow-custom:2.8.1
+
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://admin:admin@postgres/analytics
