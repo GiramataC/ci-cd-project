@@ -96,14 +96,16 @@ jobs:
 
       - name: Wait for DAG run to complete
         run: |
-          echo "Polling DAG run status..."
-          for i in $(seq 1 20); do
-            STATE=$(docker exec airflow_webserver airflow dags state mini_data_pipeline $(date +%Y-%m-%dT%H:%M:%S) 2>/dev/null || echo "running")
-            echo "  attempt $i – state: $STATE"
-            if echo "$STATE" | grep -q "success"; then
-              echo "DAG completed successfully"; break
-            elif echo "$STATE" | grep -q "failed"; then
-              echo "DAG run FAILED"; exit 1
+          echo "Polling task instance states..."
+          for i in $(seq 1 24); do
+            STATES=$(docker exec airflow_webserver airflow tasks states-for-dag-run mini_data_pipeline manual__$(date -u +%Y-%m-%dT%H:%M:%S+00:00) 2>/dev/null || echo "")
+            echo "  attempt $i: $STATES"
+            if echo "$STATES" | grep -q "failed"; then
+              echo "A task FAILED"; exit 1
+            fi
+            SUCCESS_COUNT=$(echo "$STATES" | grep -c "success" || true)
+            if [ "$SUCCESS_COUNT" -ge 3 ]; then
+              echo "All 3 tasks succeeded"; break
             fi
             sleep 15
           done
@@ -111,13 +113,10 @@ jobs:
       # ── Step 3: Storage validation ─────────────────────────────────────────
       - name: Verify rows loaded into PostgreSQL
         run: |
-          docker exec postgres_db psql -U admin -d analytics -c "
-            SELECT COUNT(*) AS row_count FROM sales;
-          " | grep -E '[0-9]+' | awk '{print "Rows in sales table: "$1}'
-
-          ROW_COUNT=$(docker exec postgres_db psql -U admin -d analytics -t -c "SELECT COUNT(*) FROM sales;")
+          sleep 10
+          ROW_COUNT=$(docker exec postgres_db psql -U admin -d analytics -t -c "SELECT COUNT(*) FROM sales;" | tr -d ' \n')
           echo "Row count: $ROW_COUNT"
-          if [ "$ROW_COUNT" -lt 1 ]; then
+          if [ -z "$ROW_COUNT" ] || [ "$ROW_COUNT" -lt 1 ]; then
             echo "ERROR: No rows found in postgres.sales!"; exit 1
           fi
           echo "PostgreSQL check passed: $ROW_COUNT rows"
