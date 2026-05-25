@@ -1,3 +1,155 @@
+# name: Mini Data Platform CI/CD
+
+# on:
+#   push:
+#     branches: ["main"]
+#   pull_request:
+#     branches: ["main"]
+
+# jobs:
+#   # ── 1. Lint ─────────────────────────────────────────────────────────────────
+#   lint:
+#     name: Lint Python
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.11"
+
+#       - name: Install linters
+#         run: pip install flake8 black
+
+#       - name: flake8 (style + syntax)
+#         run: flake8 dags/ data_generator/ --max-line-length=100
+
+#       - name: black (formatting check)
+#         run: black --check dags/ data_generator/
+
+#   # ── 2. Build ─────────────────────────────────────────────────────────────────
+#   build:
+#     name: Build Docker images
+#     runs-on: ubuntu-latest
+#     needs: lint
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - name: Build all services
+#         run: docker compose build
+
+#   # ── 3. Integration test ──────────────────────────────────────────────────────
+#   integration-test:
+#     name: End-to-end data flow
+#     runs-on: ubuntu-latest
+#     needs: build
+
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - name: Start full stack
+#         run: docker compose up -d
+
+#       - name: Wait for Airflow webserver to be healthy
+#         run: |
+#           echo "Waiting for Airflow..."
+#           for i in $(seq 1 30); do
+#             if curl -sf http://localhost:8080/health | grep -q '"healthy"'; then
+#               echo "Airflow is up"; break
+#             fi
+#             echo "  attempt $i/30 – sleeping 10s"
+#             sleep 10
+#           done
+
+#       - name: Wait for MinIO to be healthy
+#         run: |
+#           for i in $(seq 1 12); do
+#             if curl -sf http://localhost:9000/minio/health/live; then
+#               echo "MinIO is up"; break
+#             fi
+#             sleep 5
+#           done
+
+#       # ── Step 1: Ingestion ──────────────────────────────────────────────────
+#       - name: Generate and upload data to MinIO
+#         run: |
+#           pip install pandas numpy minio
+#           MINIO_ENDPOINT=localhost:9000 python data_generator/generate.py
+
+#       - name: Verify file landed in MinIO bucket
+#         run: |
+#           pip install minio
+#           python - <<'EOF'
+#           from minio import Minio
+#           client = Minio("localhost:9000", access_key="minio", secret_key="minio123", secure=False)
+#           objects = list(client.list_objects("sales-data", recursive=True))
+#           assert len(objects) > 0, "No files found in MinIO bucket!"
+#           print(f"MinIO check passed: {len(objects)} file(s) found")
+#           for o in objects:
+#               print(f"  - {o.object_name} ({o.size} bytes)")
+#           EOF
+
+#       # ── Step 2: Processing ─────────────────────────────────────────────────
+#       - name: Trigger Airflow DAG
+#         run: |
+#           docker exec airflow_webserver airflow dags trigger mini_data_pipeline
+
+#       - name: Wait for DAG run to complete
+#         run: |
+#           echo "Polling task instance states..."
+#           for i in $(seq 1 24); do
+#             STATES=$(docker exec airflow_webserver airflow tasks states-for-dag-run mini_data_pipeline manual__$(date -u +%Y-%m-%dT%H:%M:%S+00:00) 2>/dev/null || echo "")
+#             echo "  attempt $i: $STATES"
+#             if echo "$STATES" | grep -q "failed"; then
+#               echo "A task FAILED"; exit 1
+#             fi
+#             SUCCESS_COUNT=$(echo "$STATES" | grep -c "success" || true)
+#             if [ "$SUCCESS_COUNT" -ge 3 ]; then
+#               echo "All 3 tasks succeeded"; break
+#             fi
+#             sleep 15
+#           done
+
+#       # ── Step 3: Storage validation ─────────────────────────────────────────
+#       - name: Verify rows loaded into PostgreSQL
+#         run: |
+#           sleep 10
+#           ROW_COUNT=$(docker exec postgres_db psql -U admin -d analytics -t -c "SELECT COUNT(*) FROM sales;" | tr -d ' \n')
+#           echo "Row count: $ROW_COUNT"
+#           if [ -z "$ROW_COUNT" ] || [ "$ROW_COUNT" -lt 1 ]; then
+#             echo "ERROR: No rows found in postgres.sales!"; exit 1
+#           fi
+#           echo "PostgreSQL check passed: $ROW_COUNT rows"
+
+#       # ── Step 4: Metabase API check ─────────────────────────────────────────
+#       - name: Wait for Metabase to be ready
+#         run: |
+#           for i in $(seq 1 24); do
+#             if curl -sf http://localhost:3000/api/health | grep -q '"status":"ok"'; then
+#               echo "Metabase is up"; break
+#             fi
+#             echo "  attempt $i/24 – sleeping 10s"
+#             sleep 10
+#           done
+
+#       - name: Metabase API health check
+#         run: |
+#           HEALTH=$(curl -sf http://localhost:3000/api/health)
+#           echo "Metabase health response: $HEALTH"
+#           echo "$HEALTH" | grep -q '"status":"ok"' || (echo "Metabase not healthy!"; exit 1)
+
+#       - name: Collect logs on failure
+#         if: failure()
+#         run: |
+#           echo "=== Airflow webserver logs ===" && docker logs airflow_webserver --tail 50 || true
+#           echo "=== Airflow scheduler logs ===" && docker logs airflow_scheduler --tail 50 || true
+#           echo "=== Postgres logs ===" && docker logs postgres_db --tail 30 || true
+#           echo "=== MinIO logs ===" && docker logs minio_storage --tail 20 || true
+
+#       - name: Tear down
+#         if: always()
+#         run: docker compose down -v
+
 name: Mini Data Platform CI/CD
 
 on:
@@ -53,12 +205,12 @@ jobs:
       - name: Wait for Airflow webserver to be healthy
         run: |
           echo "Waiting for Airflow..."
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health | grep -q '"healthy"'; then
-              echo "Airflow is up"; break
+          for i in $(seq 1 40); do
+            if curl -sf http://localhost:8080/health 2>/dev/null | grep -q "healthy"; then
+              echo "Airflow is up after $i attempts"; break
             fi
-            echo "  attempt $i/30 – sleeping 10s"
-            sleep 10
+            echo "  attempt $i/40 - sleeping 15s"
+            sleep 15
           done
 
       - name: Wait for MinIO to be healthy
@@ -70,7 +222,6 @@ jobs:
             sleep 5
           done
 
-      # ── Step 1: Ingestion ──────────────────────────────────────────────────
       - name: Generate and upload data to MinIO
         run: |
           pip install pandas numpy minio
@@ -78,7 +229,6 @@ jobs:
 
       - name: Verify file landed in MinIO bucket
         run: |
-          pip install minio
           python - <<'EOF'
           from minio import Minio
           client = Minio("localhost:9000", access_key="minio", secret_key="minio123", secure=False)
@@ -89,46 +239,33 @@ jobs:
               print(f"  - {o.object_name} ({o.size} bytes)")
           EOF
 
-      # ── Step 2: Processing ─────────────────────────────────────────────────
-      - name: Trigger Airflow DAG
+      - name: Trigger Airflow DAG and wait for data in Postgres
         run: |
           docker exec airflow_webserver airflow dags trigger mini_data_pipeline
-
-      - name: Wait for DAG run to complete
-        run: |
-          echo "Polling task instance states..."
-          for i in $(seq 1 24); do
-            STATES=$(docker exec airflow_webserver airflow tasks states-for-dag-run mini_data_pipeline manual__$(date -u +%Y-%m-%dT%H:%M:%S+00:00) 2>/dev/null || echo "")
-            echo "  attempt $i: $STATES"
-            if echo "$STATES" | grep -q "failed"; then
-              echo "A task FAILED"; exit 1
-            fi
-            SUCCESS_COUNT=$(echo "$STATES" | grep -c "success" || true)
-            if [ "$SUCCESS_COUNT" -ge 3 ]; then
-              echo "All 3 tasks succeeded"; break
-            fi
+          echo "DAG triggered, polling Postgres for results..."
+          for i in $(seq 1 40); do
             sleep 15
+            ROW_COUNT=$(docker exec postgres_db psql -U admin -d analytics -t \
+              -c "SELECT COUNT(*) FROM sales;" 2>/dev/null | tr -d ' \n')
+            echo "  attempt $i/40 - rows in postgres.sales: ${ROW_COUNT:-0}"
+            if [ "${ROW_COUNT:-0}" -gt 0 ]; then
+              echo "Pipeline succeeded: $ROW_COUNT rows loaded"; exit 0
+            fi
+            FAILED=$(docker exec airflow_webserver airflow dags list-runs \
+              -d mini_data_pipeline --state failed 2>/dev/null | grep -c "failed" || true)
+            if [ "$FAILED" -gt 0 ]; then
+              echo "DAG run failed!"; exit 1
+            fi
           done
+          echo "ERROR: Timed out - no rows appeared in postgres.sales"; exit 1
 
-      # ── Step 3: Storage validation ─────────────────────────────────────────
-      - name: Verify rows loaded into PostgreSQL
-        run: |
-          sleep 10
-          ROW_COUNT=$(docker exec postgres_db psql -U admin -d analytics -t -c "SELECT COUNT(*) FROM sales;" | tr -d ' \n')
-          echo "Row count: $ROW_COUNT"
-          if [ -z "$ROW_COUNT" ] || [ "$ROW_COUNT" -lt 1 ]; then
-            echo "ERROR: No rows found in postgres.sales!"; exit 1
-          fi
-          echo "PostgreSQL check passed: $ROW_COUNT rows"
-
-      # ── Step 4: Metabase API check ─────────────────────────────────────────
       - name: Wait for Metabase to be ready
         run: |
           for i in $(seq 1 24); do
             if curl -sf http://localhost:3000/api/health | grep -q '"status":"ok"'; then
               echo "Metabase is up"; break
             fi
-            echo "  attempt $i/24 – sleeping 10s"
+            echo "  attempt $i/24 - sleeping 10s"
             sleep 10
           done
 
@@ -141,10 +278,9 @@ jobs:
       - name: Collect logs on failure
         if: failure()
         run: |
-          echo "=== Airflow webserver logs ===" && docker logs airflow_webserver --tail 50 || true
-          echo "=== Airflow scheduler logs ===" && docker logs airflow_scheduler --tail 50 || true
-          echo "=== Postgres logs ===" && docker logs postgres_db --tail 30 || true
-          echo "=== MinIO logs ===" && docker logs minio_storage --tail 20 || true
+          echo "=== Airflow scheduler logs ===" && docker logs airflow_scheduler --tail 80 || true
+          echo "=== Airflow webserver logs ===" && docker logs airflow_webserver --tail 30 || true
+          echo "=== Postgres logs ===" && docker logs postgres_db --tail 20 || true
 
       - name: Tear down
         if: always()
