@@ -110,18 +110,21 @@ def load(**context):
 
     inserted = 0
     for _, row in df.iterrows():
-        cur.execute("""
+        cur.execute(
+            """
             INSERT INTO sales (id, product, quantity, price, timestamp, total, profit)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            int(row["id"]),
-            str(row["product"]),
-            int(row["quantity"]),
-            float(row["price"]),
-            row["timestamp"],
-            float(row["total"]),
-            float(row["profit"]),
-        ))
+        """,
+            (
+                int(row["id"]),
+                str(row["product"]),
+                int(row["quantity"]),
+                float(row["price"]),
+                row["timestamp"],
+                float(row["total"]),
+                float(row["profit"]),
+            ),
+        )
         inserted += 1
 
     conn.commit()

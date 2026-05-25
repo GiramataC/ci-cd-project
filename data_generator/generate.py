@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -16,16 +15,17 @@ MINIO_BUCKET = os.getenv("MINIO_BUCKET", "sales-data")
 def generate_data(n=1000):
     base_time = datetime.now() - timedelta(days=30)
     timestamps = [
-        base_time + timedelta(minutes=np.random.randint(0, 43200))
-        for _ in range(n)
+        base_time + timedelta(minutes=np.random.randint(0, 43200)) for _ in range(n)
     ]
-    df = pd.DataFrame({
-        "id": range(n),
-        "product": np.random.choice(["Widget A", "Widget B", "Widget C"], n),
-        "quantity": np.random.randint(1, 10, n),
-        "price": np.round(np.random.uniform(5, 100, n), 2),
-        "timestamp": sorted(timestamps),
-    })
+    df = pd.DataFrame(
+        {
+            "id": range(n),
+            "product": np.random.choice(["Widget A", "Widget B", "Widget C"], n),
+            "quantity": np.random.randint(1, 10, n),
+            "price": np.round(np.random.uniform(5, 100, n), 2),
+            "timestamp": sorted(timestamps),
+        }
+    )
     df["total"] = np.round(df["quantity"] * df["price"], 2)
     return df
 
