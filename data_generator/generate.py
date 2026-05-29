@@ -64,6 +64,6 @@ if __name__ == "__main__":
     try:
         upload_to_minio(df, MINIO_BUCKET, object_name)
     except S3Error as e:
-        
+        # FIX: was silently falling back to /tmp, hiding upload failures from CI
         print(f"MinIO upload failed: {e}", file=sys.stderr)
         sys.exit(1)
