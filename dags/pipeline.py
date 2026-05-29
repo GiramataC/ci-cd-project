@@ -108,25 +108,34 @@ def load(**context):
         )
     """)
 
-    inserted = 0
-    for _, row in df.iterrows():
-        cur.execute(
-            """
-            INSERT INTO sales (id, product, quantity, price, timestamp, total, profit)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """,
-            (
-                int(row["id"]),
-                str(row["product"]),
-                int(row["quantity"]),
-                float(row["price"]),
-                row["timestamp"],
-                float(row["total"]),
-                float(row["profit"]),
-            ),
-        )
-        inserted += 1
+    # FIX: truncate before insert so re-runs (including CI re-triggers) don't
+    # accumulate duplicate rows. For a daily full-load pattern this is correct;
+    # swap for ON CONFLICT if you need incremental/upsert semantics instead.
+    cur.execute("TRUNCATE TABLE sales")
+    log.info("Truncated sales table before load")
 
+    rows = [
+        (
+            int(row["id"]),
+            str(row["product"]),
+            int(row["quantity"]),
+            float(row["price"]),
+            row["timestamp"],
+            float(row["total"]),
+            float(row["profit"]),
+        )
+        for _, row in df.iterrows()
+    ]
+
+    cur.executemany(
+        """
+        INSERT INTO sales (id, product, quantity, price, timestamp, total, profit)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """,
+        rows,
+    )
+
+    inserted = len(rows)
     conn.commit()
     cur.close()
     conn.close()

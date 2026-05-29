@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import os
 import io
+import sys
 from minio import Minio
 from minio.error import S3Error
 
@@ -63,9 +64,6 @@ if __name__ == "__main__":
     try:
         upload_to_minio(df, MINIO_BUCKET, object_name)
     except S3Error as e:
-        print(f"MinIO upload failed: {e}")
-        # Fallback: save locally so the pipeline can still be tested
-        os.makedirs("/tmp/data", exist_ok=True)
-        local_path = f"/tmp/data/{object_name}"
-        df.to_csv(local_path, index=False)
-        print(f"Saved locally to {local_path}")
+        
+        print(f"MinIO upload failed: {e}", file=sys.stderr)
+        sys.exit(1)

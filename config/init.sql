@@ -1,3 +1,5 @@
+
+
 -- Create metabase database (Metabase needs its own DB for its internal state)
 CREATE DATABASE metabase;
 
@@ -14,6 +16,9 @@ CREATE TABLE IF NOT EXISTS sales (
     profit      FLOAT,
     ingested_at TIMESTAMP DEFAULT NOW()
 );
+
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_id_timestamp ON sales (id, timestamp);
 
 CREATE INDEX IF NOT EXISTS idx_sales_product   ON sales (product);
 CREATE INDEX IF NOT EXISTS idx_sales_timestamp ON sales (timestamp);

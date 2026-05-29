@@ -1,7 +1,4 @@
 
-# x-airflow-common: &airflow-common
-#   image: apache/airflow:2.8.1
-
 
 x-airflow-common: &airflow-common
   build:
@@ -19,7 +16,7 @@ x-airflow-common: &airflow-common
     MINIO_ACCESS_KEY: "minio"
     MINIO_SECRET_KEY: "minio123"
     MINIO_BUCKET: "sales-data"
-    _PIP_ADDITIONAL_REQUIREMENTS: "minio pandas psycopg2-binary"
+    # _PIP_ADDITIONAL_REQUIREMENTS: "minio pandas psycopg2-binary"
   volumes:
     - ./dags:/opt/airflow/dags
     - ./data_generator:/opt/airflow/data_generator
@@ -28,7 +25,8 @@ x-airflow-common: &airflow-common
     postgres:
       condition: service_healthy
     minio:
-      condition: service_started
+      # condition: service_started
+      condition: service_healthy
   networks:
     - datanet
 
@@ -73,39 +71,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Creates the MinIO bucket on first startup then exits
-  # minio-init:
-  #   image: minio/minio
-  #   container_name: minio_init
-  #   depends_on:
-  #     minio:
-  #       condition: service_healthy
-  #   networks:
-  #     - datanet
-  #   entrypoint: >
-  #     /bin/sh -c "
-  #       curl -sf http://minio:9000/minio/health/live &&
-  #       curl -sf -X PUT http://minio:9000/sales-data
-  #         -H 'Authorization: AWS minio:minio123'
-  #         || true;
-  #       echo 'Bucket init done';
-  #     "
-
-  # airflow-init:
-  #   <<: *airflow-common
-  #   container_name: airflow_init
-  #   entrypoint: >
-  #     /bin/bash -c "
-  #       airflow db init &&
-  #       airflow users create
-  #         --username admin
-  #         --password admin
-  #         --firstname Admin
-  #         --lastname User
-  #         --role Admin
-  #         --email admin@example.com || true
-  #     "
-  #   restart: "no"
+  
 
   airflow-init:
     <<: *airflow-common
@@ -113,6 +79,11 @@ services:
     entrypoint: /bin/bash
     command: -c "airflow db migrate && airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
     restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   airflow-webserver:
     <<: *airflow-common
